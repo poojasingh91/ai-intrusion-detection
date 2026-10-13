@@ -17,6 +17,7 @@ TEST_PATH = Path(
     "Thursday-WorkingHours-Morning-WebAttacks.pcap_ISCX.csv.parquet"
 )
 
+RESULTS_DIR = Path("results")
 THRESHOLD = 0.01
 
 
@@ -32,7 +33,7 @@ def prepare_features(df):
     X = df.drop(
         columns=["Label", "Destination Port"],
         errors="ignore",
-    )
+    ).copy()
 
     for col in X.columns:
         X[col] = pd.to_numeric(X[col], errors="coerce")
@@ -40,10 +41,14 @@ def prepare_features(df):
     X = X.replace([np.inf, -np.inf], np.nan)
     X = X.dropna(axis=1, how="all")
     X = X.loc[:, X.nunique(dropna=True) > 1]
+
     return X
 
 
 def main():
+    RESULTS_DIR.mkdir(exist_ok=True)
+
+    print("Loading training dataset...")
     train = load_data(TRAIN_PATH)
     train = train[train["Label"].isin(["BENIGN", "DDOS"])]
     train = train.drop_duplicates().reset_index(drop=True)
@@ -51,17 +56,16 @@ def main():
     y_train = (train["Label"] == "DDOS").astype(int)
     X_train = prepare_features(train)
 
+    print(f"Training rows: {len(train)}")
+    print(f"Training features: {len(X_train.columns)}")
+
+    print("\nLoading external test dataset...")
     test = load_data(TEST_PATH)
-    X_test = test.drop(
-        columns=["Label", "Destination Port"],
-        errors="ignore",
-    )
+
+    X_test = prepare_features(test)
     X_test = X_test.reindex(columns=X_train.columns)
-
-    for col in X_test.columns:
-        X_test[col] = pd.to_numeric(X_test[col], errors="coerce")
-
     X_test = X_test.replace([np.inf, -np.inf], np.nan)
+
     y_test = (test["Label"] != "BENIGN").astype(int)
 
     model = Pipeline([
@@ -75,16 +79,44 @@ def main():
         )),
     ])
 
-    print("Training model...")
+    print("\nTraining model...")
     model.fit(X_train, y_train)
 
     probabilities = model.predict_proba(X_test)[:, 1]
     predictions = (probabilities >= THRESHOLD).astype(int)
 
-    # Summarize detection by individual attack category.
-    results = test[["Label"]].copy()
+    results = test.copy()
     results["malicious_probability"] = probabilities
     results["predicted_malicious"] = predictions
+    results["actual_malicious"] = y_test.to_numpy()
+
+    results["error_type"] = "Correct"
+    results.loc[
+        (y_test.to_numpy() == 1) & (predictions == 0),
+        "error_type",
+    ] = "False Negative"
+    results.loc[
+        (y_test.to_numpy() == 0) & (predictions == 1),
+        "error_type",
+    ] = "False Positive"
+
+    false_negatives = results[
+        results["error_type"] == "False Negative"
+    ].copy()
+
+    false_positives = results[
+        results["error_type"] == "False Positive"
+    ].copy()
+
+    false_negatives.to_csv(
+        RESULTS_DIR / "false_negatives.csv",
+        index=False,
+    )
+
+    false_positives.to_csv(
+        RESULTS_DIR / "false_positives.csv",
+        index=False,
+    )
 
     print(f"\nThreshold: {THRESHOLD}")
     print("\nDetection by attack category:")
@@ -96,56 +128,118 @@ def main():
         median_score=("malicious_probability", "median"),
     )
 
+    summary["missed"] = summary["samples"] - summary["detected"]
     summary["detection_rate"] = (
         summary["detected"] / summary["samples"]
     )
 
     print(summary.to_string(float_format=lambda x: f"{x:.4f}"))
+    summary.to_csv(RESULTS_DIR / "detection_by_attack.csv")
 
-    # Compare feature distributions between training and external data.
-    benign_train = train[train["Label"] == "BENIGN"]
-    malicious_test = test[test["Label"] != "BENIGN"]
+    score_summary = results.groupby("Label")[
+        "malicious_probability"
+    ].agg(
+        samples="count",
+        minimum="min",
+        percentile_25=lambda s: s.quantile(0.25),
+        median="median",
+        percentile_75=lambda s: s.quantile(0.75),
+        maximum="max",
+        mean="mean",
+    )
 
-    train_features = prepare_features(benign_train)
-    test_features = prepare_features(malicious_test)
+    score_summary.to_csv(
+        RESULTS_DIR / "attack_score_summary.csv"
+    )
 
-    common = [
-        c for c in X_train.columns
-        if c in train_features.columns and c in test_features.columns
-    ]
+    print("\nPrediction score distributions:")
+    print(score_summary.to_string(float_format=lambda x: f"{x:.6f}"))
 
-    rows = []
+    missed_mask = (
+        (y_test.to_numpy() == 1) & (predictions == 0)
+    )
+    detected_mask = (
+        (y_test.to_numpy() == 1) & (predictions == 1)
+    )
 
-    for col in common:
-        a = pd.to_numeric(train_features[col], errors="coerce")
-        b = pd.to_numeric(test_features[col], errors="coerce")
+    feature_rows = []
 
-        a = a.replace([np.inf, -np.inf], np.nan).dropna()
-        b = b.replace([np.inf, -np.inf], np.nan).dropna()
+    for col in X_train.columns:
+        missed_values = X_test.loc[missed_mask, col].dropna()
+        detected_values = X_test.loc[detected_mask, col].dropna()
 
-        if len(a) == 0 or len(b) == 0:
+        if missed_values.empty or detected_values.empty:
             continue
 
-        rows.append({
+        missed_median = missed_values.median()
+        detected_median = detected_values.median()
+
+        scale = abs(missed_median) + abs(detected_median)
+
+        relative_difference = (
+            abs(missed_median - detected_median) / scale
+            if scale != 0
+            else 0.0
+        )
+
+        feature_rows.append({
             "feature": col,
-            "training_benign_median": a.median(),
-            "external_attack_median": b.median(),
-            "training_benign_mean": a.mean(),
-            "external_attack_mean": b.mean(),
+            "missed_attack_median": missed_median,
+            "detected_attack_median": detected_median,
+            "missed_attack_mean": missed_values.mean(),
+            "detected_attack_mean": detected_values.mean(),
+            "relative_median_difference": relative_difference,
         })
 
-    comparison = pd.DataFrame(rows)
-    Path("results").mkdir(exist_ok=True)
-    comparison.to_csv(
-        "results/feature_distribution_comparison.csv",
+    feature_comparison = pd.DataFrame(feature_rows)
+
+    if not feature_comparison.empty:
+        feature_comparison = feature_comparison.sort_values(
+            "relative_median_difference",
+            ascending=False,
+        )
+
+    feature_comparison.to_csv(
+        RESULTS_DIR / "false_negative_feature_comparison.csv",
         index=False,
     )
 
-    summary.to_csv("results/detection_by_attack.csv")
+    print("\nMissed attacks by category:")
 
-    print("\nSaved:")
-    print("results/detection_by_attack.csv")
-    print("results/feature_distribution_comparison.csv")
+    if false_negatives.empty:
+        print("No false negatives at this threshold.")
+    else:
+        missed_summary = false_negatives.groupby("Label").agg(
+            missed_samples=("Label", "size"),
+            mean_score=("malicious_probability", "mean"),
+            median_score=("malicious_probability", "median"),
+            maximum_score=("malicious_probability", "max"),
+        )
+
+        print(
+            missed_summary.to_string(
+                float_format=lambda x: f"{x:.6f}"
+            )
+        )
+
+    print(f"\nFalse negatives: {len(false_negatives)}")
+    print(f"False positives: {len(false_positives)}")
+
+    print("\nTop 15 features differing between missed and detected attacks:")
+    if feature_comparison.empty:
+        print("Insufficient samples for feature comparison.")
+    else:
+        print(feature_comparison.head(15).to_string(index=False))
+
+    print("\nSaved files:")
+    for filename in [
+        "false_negatives.csv",
+        "false_positives.csv",
+        "attack_score_summary.csv",
+        "false_negative_feature_comparison.csv",
+        "detection_by_attack.csv",
+    ]:
+        print(RESULTS_DIR / filename)
 
 
 if __name__ == "__main__":
