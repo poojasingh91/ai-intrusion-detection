@@ -104,6 +104,24 @@ ai-intrusion-detection/
 
 The dataset is stored locally and is excluded from Git tracking. The `results/` directory contains generated evaluation outputs when the scripts have been run.
 
+## External Attack Detection Performance
+
+The model was evaluated on an independent CIC-IDS2017 Thursday Web Attacks dataset using a classification threshold of 0.01.
+
+![External Attack Detection Rates](results/attack_detection_rates.png)
+
+### Detection Results
+
+| Attack Category | Samples | Detected | Missed | Detection Rate |
+|---|---:|---:|---:|---:|
+| Web Attack – Brute Force | 1,507 | 1,210 | 297 | 80.29% |
+| Web Attack – SQL Injection | 21 | 1 | 20 | 4.76% |
+| Web Attack – XSS | 652 | 593 | 59 | 90.95% |
+
+**Key finding:** The model detects XSS and brute-force attacks relatively well, but struggles to identify SQL injection attacks. These results highlight the challenges of generalizing from DDoS training data to different attack categories.
+
+**Classification threshold:** 0.01
+
 ## Installation and Usage
 
 ### 1. Clone the repository
