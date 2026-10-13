@@ -1,7 +1,15 @@
+# Python environment
 .venv/
 __pycache__/
 *.pyc
+
+# Dataset files
 data/
 *.csv
 *.parquet
+
+# Secrets and configuration
 .env
+
+# Generated results
+results/
