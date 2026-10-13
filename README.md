@@ -197,6 +197,64 @@ Planned extensions include:
 
 This project explores AI/ML for cybersecurity, with an emphasis on intrusion detection, experimental rigor, interpretability, and generalization. It provides a starting point for investigating trustworthy machine learning in network security.
 
+## External Web Attack Evaluation
+
+### Overview
+
+This project evaluates a Random Forest intrusion detection model trained on the CIC-IDS2017 Friday DDoS dataset and tested on the independent Thursday Web Attacks dataset.
+
+The external test dataset contains 170,366 network-flow samples:
+
+- Benign traffic: 168,186 samples
+- Malicious traffic: 2,180 samples
+- Attack categories: Brute Force, SQL Injection, and XSS
+
+The model uses 67 training features and a probability threshold of 0.01 for the attack-category analysis.
+
+### Detection Rate by Attack Category
+
+The following results were obtained using a threshold of 0.01.
+
+| Traffic category | Samples | Detected | Missed | Detection rate |
+|---|---:|---:|---:|---:|
+| Benign | 168,186 | 2,930 flagged | 165,256 not flagged | 1.74% false-positive rate |
+| Web Attack – Brute Force | 1,507 | 1,210 | 297 | 80.29% |
+| Web Attack – SQL Injection | 21 | 1 | 20 | 4.76% |
+| Web Attack – XSS | 652 | 593 | 59 | 90.95% |
+
+### Detection Rate Visualization
+
+![Detection rates by attack category and threshold](results/attack_detection_rates.png)
+
+The results show that detection performance varies significantly across attack categories. XSS achieves the highest detection rate, followed by Brute Force. SQL Injection remains difficult to detect.
+
+### Threshold Analysis
+
+Changing the classification threshold changes the trade-off between attack detection and false positives.
+
+| Threshold | Brute Force detection | SQL Injection detection | XSS detection | Benign samples flagged |
+|---:|---:|---:|---:|---:|
+| 0.001 | 80.56% | 52.38% | 95.55% | 6,250 |
+| 0.002 | 80.56% | 52.38% | 95.55% | 5,675 |
+| 0.005 | 80.49% | 14.29% | 95.09% | 4,177 |
+| 0.010 | 80.29% | 4.76% | 90.95% | 2,930 |
+| 0.020 | 0.00% | 4.76% | 0.00% | 1,857 |
+| 0.050 | 0.00% | 0.00% | 0.00% | 982 |
+
+Lower thresholds can improve the detection of certain attack categories, but they also increase false positives on benign traffic. The appropriate threshold depends on the acceptable balance between missed attacks and false alarms.
+
+### Limitations
+
+- The model is trained on DDoS traffic but evaluated on different web-attack categories, creating a cross-dataset and cross-attack generalization challenge.
+- The SQL Injection test subset contains only 21 samples, so its detection rate is sensitive to individual predictions.
+- Results depend on the selected threshold and dataset characteristics.
+- A high overall accuracy can be misleading when benign traffic dominates the test dataset.
+- These results represent offline evaluation and do not establish real-time detection performance.
+
+### Reproducibility
+
+The analysis scripts and generated results are available in this repository. The external evaluation and threshold analysis can be reproduced using the corresponding Python scripts and the required datasets.
+
 ## Author
 
 **Pooja Singh**
