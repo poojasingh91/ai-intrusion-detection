@@ -108,7 +108,7 @@ The dataset is stored locally and is excluded from Git tracking. The `results/` 
 
 The model was evaluated on an independent CIC-IDS2017 Thursday Web Attacks dataset using a classification threshold of 0.01.
 
-![External Attack Detection Rates](../ai-intrusion-detection/results/attack_detection_rates.png)
+![External Attack Detection Rates](/results/attack_detection_rates.png)
 
 ### Detection Results
 
